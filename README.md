@@ -21,7 +21,7 @@ Modular Architecture: components for UI and lib/models for AI logic.
 ## 📁 Detailed File Structure
 
 ai-fitness-nutrition-coach/
-
+```
 ├── app/                     # Next.js App Router: Houses pages, layouts, and API routes
 │   ├── api/                 # Backend API routes for data fetching and logic
 │   │   ├── auth/[...nextauth]/route.js  # Authentication endpoints
@@ -61,7 +61,7 @@ ai-fitness-nutrition-coach/
 ├── next.config.mjs          # Next.js specific configuration
 ├── postcss.config.mjs       # Configuration for PostCSS (Tailwind CSS)
 └── README.md                # Project documentation
-
+```
 
 Node.js and npm/yarn/pnpm/bun installed
 
