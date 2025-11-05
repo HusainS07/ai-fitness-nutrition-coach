@@ -3,83 +3,126 @@ import connectDB from '@/lib/db';
 import UserProfile from '@/models/userProfile';
 import { authOptions } from '@/lib/auth';
 
-export async function POST(req) {
+export async function GET(req) {
   try {
-    console.log('🔐 Getting session...');
+    console.log('🔐 Getting session for GET...');
     const session = await getServerSession(authOptions);
     if (!session) {
       console.error('❌ No session found');
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
     }
 
-    console.log('🌐 Connecting to DB...');
+    console.log('🌐 Connecting to DB for GET...');
     await connectDB();
 
-    const { foodInput } = await req.json();
-    if (!foodInput) {
-      console.error('❌ No foodInput provided');
-      return new Response(JSON.stringify({ error: 'Food input is required' }), { status: 400 });
+    const { searchParams } = new URL(req.url);
+    const email = searchParams.get('email');
+    if (!email || email !== session.user.email) {
+      console.error('❌ Invalid or unauthorized email');
+      return new Response(JSON.stringify({ error: 'Invalid email' }), { status: 400 });
     }
 
-    console.log('🧑 Fetching user...');
-    let user = await UserProfile.findOne({ email: session.user.email });
+    console.log('🧑 Fetching user for GET...');
+    const user = await UserProfile.findOne({ email });
     if (!user) {
-      console.log(`🧑 User not found for ${session.user.email}, creating new profile`);
+      console.log(`🧑 No profile found for ${email}`);
+      return new Response(JSON.stringify({ user: null }), { status: 200 });
+    }
+
+    console.log('✅ Profile fetched successfully:', user);
+    return new Response(JSON.stringify({ user }), { status: 200 });
+  } catch (error) {
+    console.error('🔥 Uncaught error in /api/user/update GET:', error.message, error.stack);
+    return new Response(JSON.stringify({ error: 'Internal server error' }), { status: 500 });
+  }
+}
+
+export async function POST(req) {
+  try {
+    console.log('🔐 Getting session for POST...');
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      console.error('❌ No session found');
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    }
+
+    console.log('🌐 Connecting to DB for POST...');
+    await connectDB();
+
+    const profileData = await req.json();
+    console.log('📥 Received profile data:', profileData);
+
+    if (!profileData.email || profileData.email !== session.user.email) {
+      console.error('❌ Invalid or unauthorized email');
+      return new Response(JSON.stringify({ error: 'Invalid email' }), { status: 400 });
+    }
+
+    // Validate required fields
+    const requiredFields = ['name', 'age', 'gender', 'weight', 'goal', 'duration'];
+    const missingFields = requiredFields.filter((field) => !profileData[field] && profileData[field] !== 0);
+    if (missingFields.length > 0) {
+      console.error(`❌ Missing required fields: ${missingFields.join(', ')}`);
+      return new Response(JSON.stringify({ error: `Missing required fields: ${missingFields.join(', ')}` }), { status: 400 });
+    }
+
+    // Validate numeric fields
+    if (isNaN(profileData.age) || profileData.age <= 0) {
+      console.error('❌ Invalid age');
+      return new Response(JSON.stringify({ error: 'Invalid age' }), { status: 400 });
+    }
+    if (isNaN(profileData.weight) || profileData.weight <= 0) {
+      console.error('❌ Invalid weight');
+      return new Response(JSON.stringify({ error: 'Invalid weight' }), { status: 400 });
+    }
+    if (profileData.changePercent !== null && isNaN(profileData.changePercent)) {
+      console.error('❌ Invalid change percentage');
+      return new Response(JSON.stringify({ error: 'Invalid change percentage' }), { status: 400 });
+    }
+
+    console.log('🧑 Fetching user for POST...');
+    let user = await UserProfile.findOne({ email: session.user.email });
+
+    if (user) {
+      console.log(`🧑 Updating profile for ${session.user.email}`);
+      user = await UserProfile.findOneAndUpdate(
+        { email: session.user.email },
+        {
+          $set: {
+            name: profileData.name,
+            age: profileData.age,
+            gender: profileData.gender,
+            weight: profileData.weight,
+            goal: profileData.goal,
+            changePercent: profileData.changePercent,
+            duration: profileData.duration,
+            allergies: profileData.allergies || [],
+            preferences: profileData.preferences || [],
+          },
+        },
+        { new: true }
+      );
+      console.log('🔄 Updated user:', user);
+    } else {
+      console.log(`🧑 Creating new profile for ${session.user.email}`);
       user = await UserProfile.create({
         email: session.user.email,
-        goal: 'weight loss',
-        weight: 70,
+        name: profileData.name,
+        age: profileData.age,
+        gender: profileData.gender,
+        weight: profileData.weight,
+        goal: profileData.goal,
+        changePercent: profileData.changePercent,
+        duration: profileData.duration,
+        allergies: profileData.allergies || [],
+        preferences: profileData.preferences || [],
       });
+      console.log('🆕 Created user:', user);
     }
 
-    const prompt = `User with goal "${user.goal}" and weight ${user.weight || 70}kg ate: ${foodInput}. Provide concise nutritional feedback in 2-3 sentences.`;
-    console.log('🧠 Sending to Hugging Face:', prompt);
-
-    // Attempt Hugging Face API call
-    let generatedText;
-    try {
-      const response = await fetch('https://api-inference.huggingface.co/models/distilbert/distilgpt2', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${process.env.HUGGINGFACE_API_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ inputs: prompt }),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        console.error(`❌ Hugging Face API error (status ${response.status}):`, text);
-        return new Response(JSON.stringify({ error: `Hugging Face API error: ${text}` }), { status: 500 });
-      }
-
-      const contentType = response.headers.get('content-type');
-      let result;
-
-      if (contentType && contentType.includes('application/json')) {
-        result = await response.json();
-      } else {
-        const text = await response.text();
-        console.error('❌ Non-JSON response from Hugging Face:', text);
-        return new Response(JSON.stringify({ error: 'Model returned invalid output' }), { status: 500 });
-      }
-
-      generatedText = result[0]?.generated_text || result.generated_text || null;
-      if (!generatedText) {
-        console.error('❌ No generated text in response:', result);
-        return new Response(JSON.stringify({ error: 'Invalid AI response' }), { status: 500 });
-      }
-    } catch (apiError) {
-      console.error('❌ Hugging Face API failed:', apiError.message);
-      // Fallback to mock response
-      generatedText = `Two boiled eggs are a great source of protein and healthy fats, ideal for weight loss. Pair them with vegetables for added fiber. Consult a nutritionist for personalized advice.`;
-      console.log('🔔 Using mock response due to API failure');
-    }
-
-    console.log('✅ AI Response:', generatedText);
-    return new Response(JSON.stringify({ message: generatedText }), { status: 200 });
+    console.log('✅ Profile saved successfully');
+    return new Response(JSON.stringify({ message: 'Profile saved successfully', user }), { status: 200 });
   } catch (error) {
-    console.error('🔥 Uncaught error in /api/chat:', error.message, error.stack);
+    console.error('🔥 Uncaught error in /api/user/update POST:', error.message, error.stack);
     return new Response(JSON.stringify({ error: 'Internal server error' }), { status: 500 });
   }
 }

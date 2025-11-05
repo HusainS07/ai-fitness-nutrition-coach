@@ -9,7 +9,9 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@heroicons/react": "^2.2.0",
     "axios": "^1.10.0",
+    "lodash": "^4.17.21",
     "mongoose": "^8.16.1",
     "next": "15.3.4",
     "next-auth": "^4.24.11",
